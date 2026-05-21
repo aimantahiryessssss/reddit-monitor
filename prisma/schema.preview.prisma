@@ -1,0 +1,139 @@
+// Preview-only schema: SQLite, no Postgres-specific column types.
+// Used by `npm run preview` so you can click through the app on a fresh
+// machine without installing Postgres or Redis.
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./preview.db"
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+  timezone      String    @default("UTC")
+  digestTime    String    @default("09:00")
+  emailAlerts   Boolean   @default(true)
+  instantAlerts Boolean   @default(true)
+  digestEnabled Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts Account[]
+  sessions Session[]
+  keywords Keyword[]
+  matches  Match[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Keyword {
+  id            String    @id @default(cuid())
+  userId        String
+  keyword       String
+  active        Boolean   @default(true)
+  lastCheckedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  matches Match[]
+
+  @@unique([userId, keyword])
+  @@map("keywords")
+}
+
+model RedditPost {
+  id           String   @id @default(cuid())
+  redditId     String   @unique
+  type         String   @default("post")
+  title        String?
+  content      String?
+  subreddit    String
+  author       String
+  url          String
+  score        Int      @default(0)
+  numComments  Int      @default(0)
+  createdUtc   DateTime
+  isHistorical Boolean  @default(false)
+  fetchedAt    DateTime @default(now())
+
+  matches Match[]
+
+  @@map("reddit_posts")
+}
+
+model Match {
+  id           String   @id @default(cuid())
+  userId       String
+  keywordId    String
+  redditPostId String
+  notified     Boolean  @default(false)
+  digestSent   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  keyword    Keyword    @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  redditPost RedditPost @relation(fields: [redditPostId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, keywordId, redditPostId])
+  @@map("matches")
+}
+
+model DailyStats {
+  id        String   @id @default(cuid())
+  userId    String
+  keywordId String
+  date      DateTime
+  count     Int      @default(0)
+
+  @@unique([userId, keywordId, date])
+  @@map("daily_stats")
+}
