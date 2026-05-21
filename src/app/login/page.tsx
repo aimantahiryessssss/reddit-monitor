@@ -1,11 +1,19 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { signIn } from 'next-auth/react';
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="auth-page" />}>
+      <LoginPageInner />
+    </Suspense>
+  );
+}
+
+function LoginPageInner() {
   const router = useRouter();
   const params = useSearchParams();
   const [form, setForm] = useState({ email: '', password: '' });
