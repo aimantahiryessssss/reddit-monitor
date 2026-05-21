@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { Suspense, useEffect, useState, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { RefreshCw, X } from 'lucide-react';
 
@@ -15,6 +15,18 @@ function timeAgo(date: string) {
 }
 
 export default function MatchesPage() {
+  return (
+    <Suspense fallback={
+      <div style={{ display:'flex', justifyContent:'center', padding:48 }}>
+        <span className="spinner" style={{ width:32, height:32, borderWidth:3 }} />
+      </div>
+    }>
+      <MatchesPageInner />
+    </Suspense>
+  );
+}
+
+function MatchesPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const keywordId = searchParams.get('keywordId');

@@ -5,7 +5,13 @@ import IORedis from "ioredis";
 // or backfill — match data is already inserted by the seed script. Without this
 // guard, API routes that call `backfillQueue.add(...)` would hang trying to
 // connect to a Redis that isn't there.
-const PREVIEW_MODE = process.env.PREVIEW_MODE === "1";
+// Also skip Redis when REDIS_URL isn't set (e.g. Vercel build / serverless),
+// or during the Next.js build phase, so static page collection doesn't try
+// to connect to localhost:6379.
+const PREVIEW_MODE =
+  process.env.PREVIEW_MODE === "1" ||
+  !process.env.REDIS_URL ||
+  process.env.NEXT_PHASE === "phase-production-build";
 
 type StubQueue = { add: (..._args: unknown[]) => Promise<void> };
 
