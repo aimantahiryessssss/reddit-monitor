@@ -39,8 +39,13 @@ interface ListingResponse {
   data: { children: RedditChild[] };
 }
 
+// old.reddit.com is the legacy interface — less aggressively rate-limited
+// and IP-blocked than www.reddit.com, which makes a meaningful difference
+// from datacenter IPs (Vercel, AWS, etc).
+const REDDIT_HOST = process.env.REDDIT_HOST || "https://old.reddit.com";
+
 async function fetchListing(path: string): Promise<RedditChild[]> {
-  const url = `https://www.reddit.com${path}`;
+  const url = `${REDDIT_HOST}${path}`;
   const res = await fetch(url, {
     headers: { "User-Agent": UA, Accept: "application/json" },
     // Reddit responds with caching headers; let Next pass them through unchanged.
@@ -215,7 +220,7 @@ export async function fetchUserComments(
   const clean = username.replace(/^\/?u\//, "").replace(/^u\//, "").trim();
 
   for (let page = 0; page < maxPages; page++) {
-    const url = `https://www.reddit.com/user/${encodeURIComponent(clean)}/comments.json?limit=100${after ? `&after=${after}` : ""}`;
+    const url = `${REDDIT_HOST}/user/${encodeURIComponent(clean)}/comments.json?limit=100${after ? `&after=${after}` : ""}`;
     try {
       const res = await fetch(url, {
         headers: { "User-Agent": UA, Accept: "application/json" },
@@ -273,7 +278,7 @@ export async function fetchPostThreadComments(
   if (!needle) return [];
 
   // permalink format: /r/<sub>/comments/<id>/<slug>/
-  const url = `https://www.reddit.com${permalink.replace(/\/$/, "")}.json?limit=500`;
+  const url = `${REDDIT_HOST}${permalink.replace(/\/$/, "")}.json?limit=500`;
   let json: any;
   try {
     const res = await fetch(url, {
@@ -340,7 +345,7 @@ export async function fetchSubredditRecentComments(
   const needle = keyword.toLowerCase().trim();
   if (!needle) return [];
 
-  const url = `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/comments.json?limit=${limit}`;
+  const url = `${REDDIT_HOST}/r/${encodeURIComponent(subreddit)}/comments.json?limit=${limit}`;
   try {
     const res = await fetch(url, {
       headers: { "User-Agent": UA, Accept: "application/json" },
