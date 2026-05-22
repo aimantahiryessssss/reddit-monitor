@@ -131,7 +131,7 @@ export async function GET(req: NextRequest) {
     // thread mentions pullpush.io's sparse archive misses entirely. Reddit
     // unauthenticated rate-limit tolerates ~10 req/sec briefly, so we run
     // in batches of 5 with a short pause between batches.
-    const deepScanTargets = posts.slice(0, 15);
+    const deepScanTargets = posts.slice(0, 5);
     if (deepScanTargets.length) {
       const batchSize = 5;
       for (let i = 0; i < deepScanTargets.length; i += batchSize) {
@@ -165,7 +165,7 @@ export async function GET(req: NextRequest) {
       .map(([s]) => s);
     // Merge with curated SM subs and dedupe (case-insensitive).
     const merged = new Map<string, string>();
-    for (const s of [...topSubs, ...CURATED_SM_SUBS.slice(0, 6)]) {
+    for (const s of topSubs.slice(0, 3)) {
       if (!merged.has(s.toLowerCase())) merged.set(s.toLowerCase(), s);
     }
     const scanSubs = Array.from(merged.values());
@@ -230,10 +230,9 @@ export async function GET(req: NextRequest) {
     // so even low-volume authors (someone with one brand comment in our seed)
     // get pulled in — that's the snowball that turns one accidental match
     // into all their brand-related comments.
-    const expandAuthors = Object.entries(authorCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 4)
-      .map(([author]) => author);
+    // Author expansion disabled on Vercel — it adds 30-60s of sequential
+    // Reddit calls per author and blows past the 60s function limit.
+    const expandAuthors: string[] = [];
 
     // Reddit's unauthenticated rate limit is ~60 req/min. Each fetchUserComments
     // call internally paginates (maxPages * 1 req each), so we serialize the
