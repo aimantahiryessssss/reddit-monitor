@@ -9,6 +9,8 @@ import {
 } from "@/lib/reddit-public";
 import type { RedditSearchResult } from "@/lib/reddit";
 
+export const maxDuration = 60;
+
 // Brand variants. People write "Social Champ" as "socialchamp" or
 // "social-champ" too — catch all forms in one pass.
 function brandVariants(brand: string): string[] {
@@ -129,7 +131,7 @@ export async function GET(req: NextRequest) {
     // thread mentions pullpush.io's sparse archive misses entirely. Reddit
     // unauthenticated rate-limit tolerates ~10 req/sec briefly, so we run
     // in batches of 5 with a short pause between batches.
-    const deepScanTargets = posts.slice(0, 50);
+    const deepScanTargets = posts.slice(0, 15);
     if (deepScanTargets.length) {
       const batchSize = 5;
       for (let i = 0; i < deepScanTargets.length; i += batchSize) {
@@ -159,11 +161,11 @@ export async function GET(req: NextRequest) {
     for (const p of posts) subCountsForScan[p.subreddit] = (subCountsForScan[p.subreddit] ?? 0) + 1;
     const topSubs = Object.entries(subCountsForScan)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 15)
+      .slice(0, 5)
       .map(([s]) => s);
     // Merge with curated SM subs and dedupe (case-insensitive).
     const merged = new Map<string, string>();
-    for (const s of [...topSubs, ...CURATED_SM_SUBS]) {
+    for (const s of [...topSubs, ...CURATED_SM_SUBS.slice(0, 6)]) {
       if (!merged.has(s.toLowerCase())) merged.set(s.toLowerCase(), s);
     }
     const scanSubs = Array.from(merged.values());
@@ -230,7 +232,7 @@ export async function GET(req: NextRequest) {
     // into all their brand-related comments.
     const expandAuthors = Object.entries(authorCounts)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 12)
+      .slice(0, 4)
       .map(([author]) => author);
 
     // Reddit's unauthenticated rate limit is ~60 req/min. Each fetchUserComments
@@ -240,7 +242,7 @@ export async function GET(req: NextRequest) {
     if (expandAuthors.length) {
       for (const a of expandAuthors) {
         try {
-          const userCs = await fetchUserComments(a, { maxPages: 5 });
+          const userCs = await fetchUserComments(a, { maxPages: 2 });
           const filtered = userCs.filter((r) => relevant(brand, r));
           comments.push(...filtered);
         } catch (err) {
