@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import {
   searchPublicPosts,
+  searchPullpushPosts,
   searchPublicComments,
   fetchUserComments,
   fetchPostThreadComments,
@@ -117,11 +118,20 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Pull a full year. limit=100 is Reddit's per-request cap for unauthenticated.
-    const [rawPosts, rawComments] = await Promise.all([
-      searchPublicPosts(brand, { limit: 100, t: "year" }),
+    // Pull a full year. Run Reddit's own search AND pullpush in parallel —
+    // Reddit blocks Vercel's datacenter IPs intermittently (403/429), so
+    // pullpush is the reliable source for posts in production. Dedupe by id.
+    const [redditPosts, pullpushPosts, rawComments] = await Promise.all([
+      searchPublicPosts(brand, { limit: 100, t: "year" }).catch(() => []),
+      searchPullpushPosts(brand, { limit: 100, t: "year" }).catch(() => []),
       searchPublicComments(brand, { limit: 100, t: "year" }),
     ]);
+
+    const postMap = new Map<string, typeof redditPosts[number]>();
+    for (const p of pullpushPosts) postMap.set(p.id, p);
+    // Reddit's results win on conflict — fresher scores/comment counts.
+    for (const p of redditPosts) postMap.set(p.id, p);
+    const rawPosts = Array.from(postMap.values());
 
     const posts = rawPosts.filter((r) => relevant(brand, r));
     let comments = rawComments.filter((r) => relevant(brand, r));
