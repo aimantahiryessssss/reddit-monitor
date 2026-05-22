@@ -39,18 +39,27 @@ export default function KeywordsPage() {
 
   async function addKeyword(e: React.FormEvent) {
     e.preventDefault();
-    if (!input.trim()) return;
+    const items = Array.from(new Set(
+      input.split(/[,\n]/).map(s => s.trim()).filter(Boolean)
+    ));
+    if (items.length === 0) return;
     setAdding(true);
+    let added = 0;
+    const failures: string[] = [];
     try {
-      const res = await fetch('/api/keywords', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword: input.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) { toast(data.error, true); return; }
+      for (const kw of items) {
+        const res = await fetch('/api/keywords', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ keyword: kw }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) added++;
+        else failures.push(`"${kw}": ${data.error ?? res.statusText}`);
+      }
       setInput('');
-      toast('Target added — historical backfill running');
+      if (added > 0) toast(`Added ${added} target${added === 1 ? '' : 's'}${failures.length ? ` — ${failures.length} failed` : ''}`);
+      if (added === 0 && failures.length) toast(failures[0], true);
       fetchKeywords();
     } finally {
       setAdding(false);
@@ -113,7 +122,7 @@ export default function KeywordsPage() {
               style={{ paddingLeft: 40 }}
               value={input}
               onChange={e => setInput(e.target.value)}
-              placeholder="e.g. 'Next.js 14', 'Acme Corp', 'mechanical keyboard'"
+              placeholder="Add one or many — separate with commas: Next.js, Acme Corp, mechanical keyboard"
               disabled={count >= 10 || adding}
             />
           </div>
