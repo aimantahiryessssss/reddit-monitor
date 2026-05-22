@@ -8,7 +8,7 @@ import { refreshKeyword } from "@/lib/live-fetch";
 export const maxDuration = 60;
 
 const createSchema = z.object({
-  keyword: z.string().min(2).max(100).trim(),
+  keyword: z.string().min(2).max(500).trim(),
 });
 
 export async function GET(req: NextRequest) {
@@ -34,40 +34,54 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { keyword } = createSchema.parse(body);
 
-    const count = await prisma.keyword.count({ where: { userId: session.user.id } });
-    if (count >= 10) {
+    // Split on commas/newlines so the route accepts either a single keyword
+    // ("hootsuite") or a bulk string ("hootsuite, buffer, sprout social").
+    const items = Array.from(new Set(
+      keyword.split(/[,\n]/).map(s => s.trim().toLowerCase()).filter(s => s.length >= 2 && s.length <= 100)
+    ));
+    if (items.length === 0) {
+      return NextResponse.json({ error: "No valid keywords provided" }, { status: 400 });
+    }
+
+    const existingCount = await prisma.keyword.count({ where: { userId: session.user.id } });
+    const slotsLeft = 10 - existingCount;
+    if (slotsLeft <= 0) {
       return NextResponse.json({ error: "Maximum 10 keywords allowed" }, { status: 400 });
     }
+    const toAdd = items.slice(0, slotsLeft);
 
-    const existing = await prisma.keyword.findUnique({
-      where: { userId_keyword: { userId: session.user.id, keyword: keyword.toLowerCase() } },
-    });
-    if (existing) {
-      return NextResponse.json({ error: "Keyword already tracked" }, { status: 409 });
+    const added: Array<{ id: string; keyword: string }> = [];
+    const skipped: string[] = [];
+
+    for (const kwText of toAdd) {
+      const existing = await prisma.keyword.findUnique({
+        where: { userId_keyword: { userId: session.user.id, keyword: kwText } },
+      });
+      if (existing) { skipped.push(kwText); continue; }
+
+      const kw = await prisma.keyword.create({
+        data: { userId: session.user.id, keyword: kwText },
+      });
+      added.push({ id: kw.id, keyword: kw.keyword });
+
+      await backfillQueue.add("backfill", {
+        keywordId: kw.id,
+        userId: session.user.id,
+        keyword: kw.keyword,
+      });
+
+      try {
+        await refreshKeyword(session.user.id, kw.id, kw.keyword, { t: "week", limit: 15 });
+      } catch (err) {
+        console.error(`[keywords] inline fetch failed for "${kw.keyword}":`, err);
+      }
     }
 
-    const kw = await prisma.keyword.create({
-      data: { userId: session.user.id, keyword: keyword.toLowerCase() },
-    });
-
-    // Trigger historical backfill via BullMQ (real production path).
-    // In preview mode this is a stubbed no-op — the inline fetch below covers it.
-    await backfillQueue.add("backfill", {
-      keywordId: kw.id,
-      userId: session.user.id,
-      keyword: kw.keyword,
-    });
-
-    // Inline live fetch using the public Reddit JSON endpoint (no credentials).
-    // This is what makes "add a keyword → real matches appear immediately" work.
-    try {
-      const result = await refreshKeyword(session.user.id, kw.id, kw.keyword, { t: "week", limit: 15 });
-      return NextResponse.json({ keyword: kw, fetched: result.fetched, newMatches: result.newMatches }, { status: 201 });
-    } catch (err) {
-      console.error("[keywords] inline fetch failed:", err);
-      // Still return success — the keyword exists, just no live data yet
-      return NextResponse.json({ keyword: kw, fetched: 0, newMatches: 0 }, { status: 201 });
-    }
+    return NextResponse.json({
+      added,
+      skipped,
+      truncated: items.length > toAdd.length,
+    }, { status: 201 });
   } catch (err) {
     if (err instanceof z.ZodError) {
       return NextResponse.json({ error: err.errors[0].message }, { status: 400 });
