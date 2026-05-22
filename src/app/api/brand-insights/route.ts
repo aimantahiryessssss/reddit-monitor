@@ -133,7 +133,9 @@ export async function GET(req: NextRequest) {
     for (const p of redditPosts) postMap.set(p.id, p);
     const rawPosts = Array.from(postMap.values());
 
-    const posts = rawPosts.filter((r) => relevant(brand, r));
+    const posts = rawPosts
+      .filter((r) => relevant(brand, r))
+      .sort((a, b) => b.createdUtc.getTime() - a.createdUtc.getTime());
     let comments = rawComments.filter((r) => relevant(brand, r));
 
     // Deep scan: for EVERY matching post (up to 50), fetch the thread's
@@ -141,7 +143,7 @@ export async function GET(req: NextRequest) {
     // thread mentions pullpush.io's sparse archive misses entirely. Reddit
     // unauthenticated rate-limit tolerates ~10 req/sec briefly, so we run
     // in batches of 5 with a short pause between batches.
-    const deepScanTargets = posts.slice(0, 5);
+    const deepScanTargets = posts.slice(0, 10);
     if (deepScanTargets.length) {
       const batchSize = 5;
       for (let i = 0; i < deepScanTargets.length; i += batchSize) {
@@ -171,11 +173,11 @@ export async function GET(req: NextRequest) {
     for (const p of posts) subCountsForScan[p.subreddit] = (subCountsForScan[p.subreddit] ?? 0) + 1;
     const topSubs = Object.entries(subCountsForScan)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
+      .slice(0, 15)
       .map(([s]) => s);
     // Merge with curated SM subs and dedupe (case-insensitive).
     const merged = new Map<string, string>();
-    for (const s of topSubs.slice(0, 3)) {
+    for (const s of [...topSubs, ...CURATED_SM_SUBS]) {
       if (!merged.has(s.toLowerCase())) merged.set(s.toLowerCase(), s);
     }
     const scanSubs = Array.from(merged.values());

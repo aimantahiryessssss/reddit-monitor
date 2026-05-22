@@ -9,7 +9,10 @@
  */
 import type { RedditSearchResult } from "./reddit";
 
-const UA = process.env.REDDIT_USER_AGENT || "KeywordAlert/1.0 (preview)";
+// Reddit aggressively blocks requests from datacenter IPs (like Vercel's) when
+// the User-Agent looks bot-like. A browser UA gets through far more often.
+const UA = process.env.REDDIT_USER_AGENT ||
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 export type TimeRange = "hour" | "day" | "week" | "month" | "year" | "all";
 
