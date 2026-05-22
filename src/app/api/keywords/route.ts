@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { backfillQueue } from "@/lib/queue";
 import { refreshKeyword } from "@/lib/live-fetch";
 
+export const maxDuration = 60;
+
 const createSchema = z.object({
   keyword: z.string().min(2).max(100).trim(),
 });
@@ -59,7 +61,7 @@ export async function POST(req: NextRequest) {
     // Inline live fetch using the public Reddit JSON endpoint (no credentials).
     // This is what makes "add a keyword → real matches appear immediately" work.
     try {
-      const result = await refreshKeyword(session.user.id, kw.id, kw.keyword, { t: "month" });
+      const result = await refreshKeyword(session.user.id, kw.id, kw.keyword, { t: "week", limit: 15 });
       return NextResponse.json({ keyword: kw, fetched: result.fetched, newMatches: result.newMatches }, { status: 201 });
     } catch (err) {
       console.error("[keywords] inline fetch failed:", err);
