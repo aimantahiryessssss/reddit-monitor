@@ -4,6 +4,7 @@ import {
   searchPublicPosts,
   searchPullpushPosts,
   searchPublicComments,
+  searchSerpAPI,
   fetchUserComments,
   fetchPostThreadComments,
   fetchSubredditRecentComments,
@@ -121,22 +122,41 @@ export async function GET(req: NextRequest) {
     // Pull a full year. Run Reddit's own search AND pullpush in parallel —
     // Reddit blocks Vercel's datacenter IPs intermittently (403/429), so
     // pullpush is the reliable source for posts in production. Dedupe by id.
-    const [redditPosts, pullpushPosts, rawComments] = await Promise.all([
+    // SerpAPI (via Google) is the primary source on Vercel — Reddit blocks
+    // datacenter IPs with 403. Pullpush fills in historical archive. Reddit's
+    // own search returns nothing on Vercel but stays in the mix for local/dev.
+    const [redditPosts, pullpushPosts, serpRecent, serpMonth, rawComments] = await Promise.all([
       searchPublicPosts(brand, { limit: 100, t: "year" }).catch(() => []),
       searchPullpushPosts(brand, { limit: 100, t: "year" }).catch(() => []),
+      // Two SerpAPI calls — one recency-filtered for fresh hits, one over the
+      // full year for archive depth. 2 calls per brand search = ~50 brand
+      // searches/month on the free tier (100 quota).
+      searchSerpAPI(brand, { limit: 100, t: "month" }).catch(() => []),
+      searchSerpAPI(brand, { limit: 100, t: "year" }).catch(() => []),
       searchPublicComments(brand, { limit: 100, t: "year" }),
     ]);
 
     const postMap = new Map<string, typeof redditPosts[number]>();
+    // Order matters: pullpush first (oldest data), then serp year, serp month,
+    // then Reddit native — later writes win on id collision and bring fresher
+    // metadata (Reddit) or fresher dates (SerpAPI recency filter).
     for (const p of pullpushPosts) postMap.set(p.id, p);
-    // Reddit's results win on conflict — fresher scores/comment counts.
+    for (const p of serpMonth.filter(r => r.type === "post")) postMap.set(p.id, p);
+    for (const p of serpRecent.filter(r => r.type === "post")) postMap.set(p.id, p);
     for (const p of redditPosts) postMap.set(p.id, p);
     const rawPosts = Array.from(postMap.values());
+
+    // SerpAPI also surfaces comment-level results when Google indexed them;
+    // merge those into the comments stream.
+    const serpComments = [
+      ...serpMonth.filter(r => r.type === "comment"),
+      ...serpRecent.filter(r => r.type === "comment"),
+    ];
 
     const posts = rawPosts
       .filter((r) => relevant(brand, r))
       .sort((a, b) => b.createdUtc.getTime() - a.createdUtc.getTime());
-    let comments = rawComments.filter((r) => relevant(brand, r));
+    let comments = [...rawComments, ...serpComments].filter((r) => relevant(brand, r));
 
     // Deep scan: for EVERY matching post (up to 50), fetch the thread's
     // comment tree and pull any comments mentioning the brand. Catches in-

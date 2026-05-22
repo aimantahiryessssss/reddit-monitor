@@ -465,6 +465,104 @@ export async function searchPullpushPosts(
   return collected;
 }
 
+/**
+ * SerpAPI-backed Reddit search. Bypasses Reddit's IP block on datacenter
+ * traffic (Vercel) by going through Google search results instead. Returns
+ * RedditSearchResult shape so callers can mix it with other sources.
+ *
+ * Each call uses 1 SerpAPI quota credit. Free tier = 100/month. Cap results
+ * at 100 per call (the max Google returns in a single page).
+ */
+export async function searchSerpAPI(
+  keyword: string,
+  opts: { limit?: number; t?: TimeRange } = {}
+): Promise<RedditSearchResult[]> {
+  const apiKey = process.env.SERPAPI_KEY;
+  if (!apiKey) {
+    console.warn("[serpapi] SERPAPI_KEY not set, skipping");
+    return [];
+  }
+
+  const { limit = 100, t = "year" } = opts;
+  const trimmed = keyword.trim();
+  // Quote multi-word terms so Google treats them as a phrase.
+  const phrase = /\s/.test(trimmed) ? `"${trimmed}"` : trimmed;
+  const q = `site:reddit.com ${phrase}`;
+
+  // Google `tbs=qdr:` time filter: h=hour, d=day, w=week, m=month, y=year.
+  const tbsMap: Record<TimeRange, string> = {
+    hour: "qdr:h", day: "qdr:d", week: "qdr:w",
+    month: "qdr:m", year: "qdr:y", all: "",
+  };
+  const tbs = tbsMap[t];
+
+  const params = new URLSearchParams({
+    engine: "google",
+    q,
+    num: String(Math.min(limit, 100)),
+    api_key: apiKey,
+  });
+  if (tbs) params.set("tbs", tbs);
+
+  let json: any;
+  try {
+    const res = await fetch(`https://serpapi.com/search.json?${params}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      console.warn(`[serpapi] ${res.status} for "${keyword}"`);
+      return [];
+    }
+    json = await res.json();
+  } catch (err) {
+    console.warn(`[serpapi] fetch failed:`, (err as Error).message);
+    return [];
+  }
+
+  const results = (json.organic_results ?? []) as Array<{
+    title?: string;
+    link?: string;
+    snippet?: string;
+    date?: string;
+  }>;
+
+  const out: RedditSearchResult[] = [];
+  for (const r of results) {
+    if (!r.link) continue;
+    // Parse reddit permalink: /r/<sub>/comments/<postId>/<slug>/<commentId?>
+    const m = r.link.match(/reddit\.com\/r\/([^/]+)\/comments\/([a-z0-9]+)(?:\/[^/]*\/([a-z0-9]+))?/i);
+    if (!m) continue;
+    const [, subreddit, postId, commentId] = m;
+    const isComment = !!commentId;
+    const id = isComment ? `t1_${commentId}` : `t3_${postId}`;
+
+    // Parse the "Mar 12, 2025" / "5 days ago" style date Google returns.
+    // Fall back to "now" if missing — sort order still favors recents because
+    // Google ranks by recency for tbs=qdr filters.
+    let createdUtc = new Date();
+    if (r.date) {
+      const parsed = Date.parse(r.date);
+      if (!isNaN(parsed)) createdUtc = new Date(parsed);
+    }
+
+    out.push({
+      id,
+      type: isComment ? "comment" : "post",
+      title: r.title?.replace(/\s*[:|—-]\s*r\/.+$/, "") ?? "",
+      content: r.snippet ?? "",
+      subreddit,
+      author: "[via google]",
+      url: r.link,
+      score: 0,
+      numComments: 0,
+      createdUtc,
+      isHistorical: t === "year" || t === "all",
+    });
+  }
+  return out;
+}
+
 export async function searchPublicAll(
   keyword: string,
   opts: { limit?: number; t?: TimeRange } = {}
